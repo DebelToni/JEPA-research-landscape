@@ -4,7 +4,7 @@
 
 `runtime/` is excluded from Git. It owns the SQLite catalogue, downloaded source artifacts, normalized documents, model responses, extraction checkpoints, model configuration, run receipts, deployment recovery and immutable site releases. Preserve it independently of the public source repository. The public dataset is reproducible from this state but is not a replacement for the evidence cache or source ledger.
 
-The deployed origin uses `deploy/jepa-landscape-site.service`, loopback port 40173 and the existing public tunnel connector. Only static published files are served. There is no public processing endpoint. The selected connector/DNS configuration and exact rollback objects are retained privately under `runtime/deploy/`; do not commit them.
+The deployed origin uses `deploy/jepa-landscape-site.service`, loopback port 40173 and the existing public tunnel connector. The origin serves static published files and a read-only agent API over that same snapshot. There is no public processing endpoint. The selected connector/DNS configuration and exact rollback objects are retained privately under `runtime/deploy/`; do not commit them.
 
 ## Model adapter
 
@@ -50,6 +50,18 @@ Bibliography extraction is available as `jepa.citations.ingest_bibliographies(St
 Python workers pin imported code until they exit. Do not assume source edits update a running worker. New prompt/parser/model revisions need explicit reprocessing with matching cache provenance. Preserve old source/record revisions; do not edit raw evidence in place. New document caches include parser versions. Legacy detailed extractions are interpreted against their original normalization with `interpret_existing`, retaining the old record privately and publishing only findings and selected results. SIGTERM checkpoints/stops an owned processing run; it does not erase valid chunks.
 
 Review `runtime/runs/`, source cursor/quota tables and per-extraction failure receipts. `uv run python scripts/usage-report.py` produces the deduplicated private pipeline-usage receipt; it excludes development agents and calls without returned usage. A deadline interruption can leave remote completion/usage unknown; an aborted local call does not prove the provider stopped immediately. Provider/configuration errors stop the run rather than repeatedly attempting the remaining queue. Output-length, validation and per-call timeout failures remain local. Parser and PDF children are bound to parent lifetime with Linux parent-death signals. Cached chunks retain separate generation and current-validation hashes; older missing generation metadata is explicitly unknown. No scheduling timer is installed.
+
+## Public agent API
+
+`/llms.txt` is the agent entry point; `/openapi.json` is the OpenAPI 3.1 contract. `/api/search`, `/api/facets`, `/api/papers/{work_id}` and its `/citations` subresource read only the published catalogue. They do not import the working store, acquire sources or run models. The catalogue's manifest hash is checked before constructing an in-memory SQLite FTS5 index. Static serving and extraction remain separate processes.
+
+Each response pins one resolved publication directory. The cache reloads when the publication symlink changes; clients can pin the returned catalogue hash and receive 409 rather than silently mixing versions. Search output is compact and bounded, query operators are treated as plain words, and invalid/unknown/repeated parameters return JSON errors. Missing scores never become zero. The origin bounds concurrent connections to 32 and idle socket waits to 30 seconds; overload returns 503 with Retry-After. The timeout is not an absolute request deadline: keep the origin loopback-only behind the existing Cloudflare proxy. API/data reads permit credential-free CORS.
+
+Agent routes and instructions are served by Python, not copied into the static build. Code changes require restarting **only `jepa-landscape-site.service`**; data promotion still needs no restart. Verify the API with both a standard Python HTTP client and a browser/client fetch, along with the existing site checks.
+
+Cloudflare has a narrowly scoped custom rule skipping only Browser Integrity Check for GET/HEAD/OPTIONS on this hostname's `/api`, `/api/`, `/data/`, `/llms.txt` and `/openapi.json` routes. BIC otherwise rejects Python's default User-Agent. Other security products, paths and hostnames retain their existing behavior. Private configuration/recovery evidence is in `runtime/deploy/agent-api-edge-audit/`; rollback removes only that rule, not the shared ruleset.
+
+API tests run as an isolated subprocess from `tests/test_api.py`; the detailed HTTP cases live in `tests/api_cases.py`. This keeps HTTP-thread allocator arenas out of subsequent parser tests' inherited address-space limit without weakening the parser sandbox.
 
 ## Publication
 

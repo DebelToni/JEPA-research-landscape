@@ -1,6 +1,6 @@
 # JEPA research landscape
 
-**[jepa.toni.foo](https://jepa.toni.foo)** · [Methodology](https://jepa.toni.foo/methodology/) · [Dataset](https://jepa.toni.foo/data/catalog.json)
+**[jepa.toni.foo](https://jepa.toni.foo)** · [Agent API](https://jepa.toni.foo/llms.txt) · [Methodology](https://jepa.toni.foo/methodology/) · [Dataset](https://jepa.toni.foo/data/catalog.json)
 
 A continuously growing catalogue of JEPA and related predictive/world-model research. Papers have stable identities, immutable source versions, experimental interpretations with selected key numbers and source-linked per-paper assessments. The code is public; full-text caches, credentials and processing logs are private.
 
@@ -14,12 +14,21 @@ A continuously growing catalogue of JEPA and related predictive/world-model rese
 - Source-location and literal-value checks, provisional rubric scores, separate relevance and extraction status. AI source checks are not independent reproduction or human review.
 - Time-boxed parallel processing with usage receipts. No unattended schedule, account rotation or paid-API fallback.
 - Rights-aware static exports, searchable React catalogue, prerendered paper pages, local citation graphs and downloadable JSON/JSONL/Markdown.
+- Public read-only agent API over the published snapshot: lexical BM25 search, filters, scores, full paper records, citation neighbors, facets and snapshot-pinned pagination. It never opens the private working database or invokes models.
 
 ## Current limits
 
 This is a working research pipeline, not a complete census or a verified experimental database. Records can be metadata-only or partially extracted; review and completeness fields are explicit. Queries and graph frontiers are resumable. Citation counts are not quality scores, and negative results are not discarded for failing to beat a baseline.
 
 PDF-only parsing currently uses bounded `pdftotext`, not Docling or visual table verification. Code/dataset links are assertions unless their recorded availability says otherwise; paper code is never executed. General venue harvesting, Semantic Scholar/Crossref adapters and reversible curator merge/split operations remain unimplemented. AI identity reviews are bibliographic proposals, not automatic merges; conflicting identities remain private pending resolution. Cross-paper scientific synthesis is outside scope.
+
+## Agent access
+
+Start at **https://jepa.toni.foo/llms.txt**. [OpenAPI 3.1](https://jepa.toni.foo/openapi.json) describes the machine interface; `/api` reports coverage and current snapshot identity. No authentication is needed.
+
+Example: `/api/search?q=latent%20prediction&extracted=true&min_score=50&limit=10`. Follow each result's API link for full extraction, score reasons and evidence references. `/api/facets` lists exact filter labels. Search is lexical and uses all query words, not semantic embeddings. Missing scores remain unknown, and citations are observed links rather than inferred scientific relationships.
+
+The origin indexes only the immutable public catalogue in memory. A publication switch refreshes the index without a restart. Pagination links pin the snapshot; HTTP 409 means publication changed and the client should restart its search. Current working results are not visible until exported and published. The detailed contract is maintained in `src/jepa/agent-api.txt` and `src/jepa/api_docs.py`.
 
 ## Run locally
 

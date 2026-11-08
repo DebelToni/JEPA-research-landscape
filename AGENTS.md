@@ -3,6 +3,7 @@
 Read README.md, OPERATIONS.md and PLAN.md before work. README/OPERATIONS record current capability; PLAN records direction and intended design. research/ contains preliminary source surveys, not an overriding implementation specification.
 
 - The pipeline, public repository and jepa.toni.foo are deployed. Recheck current run receipts and deployment state; do not report unimplemented roadmap items as completed.
+- `/llms.txt` and `/openapi.json` describe the public agent API. Keep all API queries confined to the immutable published snapshot, never the private working DB. Code changes require an origin restart; data publication refreshes the in-memory index automatically.
 - Continuous curation, manually started time-budgeted processing. No fixed corpus stages or mandatory pilot. Keep quality checks within ordinary processing.
 - Intended publication is a public GitHub repository plus jepa.toni.foo. Separate public source/allowed exports from private runtime data before initializing publication.
 - Codex Pro is the processing backend. Anton removed the usage budget for the initial night's work; manual run duration and provider limits still bound operation. Reuse Pi authentication/provider integration, small or low-thinking models, and centrally resolved profiles. No silent account rotation or paid API fallback.

@@ -27,7 +27,7 @@ def wait_for(predicate):
 def dead(pid):
     try:
         return Path(f'/proc/{pid}/stat').read_text().split(') ')[1].startswith('Z')
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return True
 
 
