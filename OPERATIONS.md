@@ -35,6 +35,10 @@ Provider usage may include catalog-estimated dollar costs. These are **not subsc
 
 OpenAlex reads `OPENALEX_API_KEY` from an explicitly supplied env file/environment and has a conservative local allocation of at most 20 requests per UTC day. Shared account consumption remains external. Free daily balance is distinct from prepaid/one-time balance: zero prepaid credit must not pause a positive free allocation. HTTP 429s persist a pause. Forward-citation queries require a resolved OpenAlex ID; `HTTPSources.openalex_resolve` accepts only an explicit arXiv-location match, not title similarity alone.
 
+`discover --source cached-graph --file GRAPH.sqlite3 --limit 1000` reuses bounded topic matches from retained scholarly `index_snapshots`. It opens an immutable, query-only source connection, refuses uncheckpointed WAL, makes no network calls and never imports or starts the source application's workers. Cached arXiv hints alone do not establish identity.
+
+`review-identities --seconds 180 --limit 20` generates cached, append-only AI proposals for conflicting IDs or matching titles/authors. It does not merge works, modify scientific appraisals or turn bibliographic similarity into confirmed identity. Conflicting identities are held out of public exports pending resolution.
+
 AlphaXiv is optional and explicitly skipped without `ALPHAXIV_API_KEY`. Do not substitute its default AI paper report for original text. The current adapter uses official MCP discovery only.
 
 Bibliography extraction is available as `jepa.citations.ingest_bibliographies(Store(...))`. It reads acquired HTML bibliographies and creates only explicit arXiv-link edges, preserving observed provider provenance. New linked papers need metadata hydration and screening before extraction.
@@ -45,7 +49,7 @@ Bibliography extraction is available as `jepa.citations.ingest_bibliographies(St
 
 Python workers pin imported code until they exit. Do not assume source edits update a running worker. New prompt/parser/model revisions need explicit reprocessing with matching cache provenance. Preserve old source/record revisions; do not edit raw evidence in place. New document caches include parser versions. Legacy detailed extractions are interpreted against their original normalization with `interpret_existing`, retaining the old record privately and publishing only findings and selected results. SIGTERM checkpoints/stops an owned processing run; it does not erase valid chunks.
 
-Review `runtime/runs/`, source cursor/quota tables and per-extraction failure receipts. A deadline interruption can leave remote completion/usage unknown; an aborted local call does not prove the provider stopped immediately. No scheduling timer is installed.
+Review `runtime/runs/`, source cursor/quota tables and per-extraction failure receipts. `uv run python scripts/usage-report.py` produces the deduplicated private pipeline-usage receipt; it excludes development agents and calls without returned usage. A deadline interruption can leave remote completion/usage unknown; an aborted local call does not prove the provider stopped immediately. Provider/configuration errors stop the run rather than repeatedly attempting the remaining queue. Output-length, validation and per-call timeout failures remain local. Parser and PDF children are bound to parent lifetime with Linux parent-death signals. Cached chunks retain separate generation and current-validation hashes; older missing generation metadata is explicitly unknown. No scheduling timer is installed.
 
 ## Publication
 
@@ -55,7 +59,7 @@ uv run jepa export
 uv run python scripts/publish.py
 ```
 
-The exporter strips verbatim evidence quotations, private processing state and raw abstracts. It validates URLs, scans for private paths/credential-like content and hashes every public data file. The publisher checks hashes and rejects hidden files/symlinks, copies a complete build into `runtime/releases/`, then atomically changes `runtime/published`. The static origin needs no restart for a new release. Retain the previous release for rollback; point the publication symlink back atomically to reverse a promotion.
+The exporter strips legacy row transcriptions, verbatim evidence quotations, private processing state and raw abstracts. Export backups live in private `runtime/export-backups/`, never under Vite's `public/` tree. Git ignore rules do not prevent Vite from copying a directory into the build. It validates URLs, scans for private paths/credential-like content and hashes every public data file. The publisher checks hashes and rejects unexpected build roots, unmanifested data, legacy experiment rows, hidden files and symlinks, copies a complete build into `runtime/releases/`, then atomically changes `runtime/published`. The static origin needs no restart for a new release. Retain the previous release for rollback; point the publication symlink back atomically to reverse a promotion.
 
 Before promotion, run unit, build and browser tests, inspect representative records and review the export. After promotion, verify `/healthz`, the catalogue, a paper's HTML/JSON/evidence, graph and search on desktop/mobile. The uptime probe checks only read-only origin/public responses and startup, not scientific correctness or processing progress.
 

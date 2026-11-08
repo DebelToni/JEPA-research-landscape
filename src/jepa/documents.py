@@ -269,6 +269,16 @@ def parse_source(data: bytes, sha: str, url: str) -> list[dict]:
     return blocks
 
 
+def _parent_death_kill(parent_pid: int):
+    """Bind this Linux child to its spawning process, including the fork race."""
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(1, signal.SIGKILL, 0, 0, 0):  # PR_SET_PDEATHSIG
+        raise OSError(ctypes.get_errno(), "Cannot bind parser lifetime to parent")
+    if os.getppid() != parent_pid:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
 def _limits():
     resource.setrlimit(resource.RLIMIT_AS, (768 * 1024**2, 768 * 1024**2))
     resource.setrlimit(resource.RLIMIT_CPU, (45, 45))
@@ -356,9 +366,13 @@ def isolated_parse(data: bytes, kind: str, sha: str, url: str, timeout: float) -
         source = Path(workspace) / "input"
         source.write_bytes(data)
         command = [sys.executable, "-I", str(Path(__file__).resolve()), "--parse", kind, str(source), sha, url]
+        parent_pid = os.getpid()
+        def prepare_parser():
+            _parent_death_kill(parent_pid)
+            _sandbox(workspace)
         with subprocess.Popen(command, cwd=workspace, env={"PATH": os.defpath, "LANG": "C.UTF-8"},
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
-                              preexec_fn=lambda: _sandbox(workspace)) as process:
+                              preexec_fn=prepare_parser) as process:
             try:
                 stdout, _ = process.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -378,8 +392,10 @@ def _parse_pdf(path: Path, sha: str, url: str) -> list[dict]:
     if not executable:
         raise ValueError("pdftotext is unavailable")
     output = path.with_suffix(".txt")
+    parent_pid = os.getpid()
     subprocess.run([executable, "-layout", "-enc", "UTF-8", str(path), str(output)],
-                   check=True, timeout=40, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                   check=True, timeout=40, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                   preexec_fn=lambda: _parent_death_kill(parent_pid))
     if output.stat().st_size > MAX_EXPANDED:
         raise ValueError("PDF output limit")
     blocks = []

@@ -78,6 +78,18 @@ def test_claim_fences_current_and_targets(tmp_path):
     assert s.claim('process', job_ids=ids)['manifestation_id'] == s._manifestation(w)['id']
 
 
+def test_export_holds_conflicting_identity_for_review(tmp_path):
+    s=Store(tmp_path/'private')
+    s.ingest(record('arxiv','2401.00001',arxiv_id='2401.00001',doi='10.1234/a',title='A',url='https://arxiv.org/abs/2401.00001'))
+    s.ingest(record('arxiv','2401.00002',arxiv_id='2401.00002',doi='10.1234/b',title='B',url='https://arxiv.org/abs/2401.00002'))
+    conflict=s.ingest(record('openalex','W1',arxiv_id='2401.00001',doi='10.1234/b',title='Conflicting provider assertion',url='https://openalex.org/W1'))
+    out=tmp_path/'public';manifest=export_catalog(s,out)
+    assert manifest['coverage']['identity_conflicts_pending']==1
+    assert conflict not in {p['work_id'] for p in json.loads((out/'catalog.json').read_text())['papers']}
+    assert s.get(conflict)['title']=='Conflicting provider assertion'
+    s.close()
+
+
 def test_export_boundary_and_schema(tmp_path):
     from jepa.models import Extraction
     s = Store(tmp_path/'private')

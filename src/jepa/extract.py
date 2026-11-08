@@ -24,6 +24,23 @@ WEIGHTS = {"claim_support": .30, "comparisons": .25, "generalization": .15,
 IMPLEMENTATION_SHA = digest(Path(__file__).read_bytes())
 
 
+class ProviderUnavailable(RuntimeError):
+    """Run-wide selected-provider/configuration failure; never retry or rotate."""
+
+
+def _resolved_profile(env):
+    profile_path = env.get("JEPA_PROFILE_PATH")
+    try:
+        if not profile_path:
+            raise ValueError("JEPA_PROFILE_PATH is required")
+        profile = json.loads(Path(profile_path).read_bytes())
+        if not isinstance(profile, dict) or not profile.get("model") or not profile.get("thinking"):
+            raise ValueError("Invalid resolved profile")
+    except (OSError, ValueError) as error:
+        raise ProviderUnavailable("Resolved provider profile unavailable") from error
+    return profile
+
+
 def model_schema():
     """Models choose evidence blocks; the host supplies immutable locations."""
     schema = Extraction.model_json_schema()
@@ -199,6 +216,8 @@ def validated_call(payload, document, directory, label, deadline, env, parse):
         atomic_json(directory / f"response-{label}-{time.time_ns()}.json",
                     {**response, "stage": label, "attempt": attempt,
                      "input_sha256": digest(json.dumps(payload, sort_keys=True).encode())})
+        if response.get("stopReason") == "error":
+            raise ProviderUnavailable("Selected provider failed")
         if response.get("stopReason") != "stop" or response.get("rejected"):
             raise RuntimeError("incomplete_response")
         try:
@@ -215,12 +234,22 @@ def validated_call(payload, document, directory, label, deadline, env, parse):
 
 
 def call_model(payload: dict, timeout: float, env: dict) -> dict:
-    result = subprocess.run(["node", env.get("JEPA_MODEL_ADAPTER", str(ADAPTER_PATH))],
-                            input=json.dumps(payload), text=True, capture_output=True,
-                            timeout=timeout, env=env)
+    try:
+        result = subprocess.run(["node", env.get("JEPA_MODEL_ADAPTER", str(ADAPTER_PATH))],
+                                input=json.dumps(payload), text=True, capture_output=True,
+                                timeout=timeout, env=env)
+    except OSError as error:
+        raise ProviderUnavailable("Selected-account model adapter unavailable") from error
     if result.returncode:
-        raise RuntimeError("Selected-account model adapter failed")
-    return json.loads(result.stdout)
+        raise ProviderUnavailable("Selected-account model adapter failed")
+    try:
+        response = json.loads(result.stdout)
+        if not isinstance(response, dict) or response.get("stopReason") not in {
+                "stop", "length", "error", "aborted", "toolUse"}:
+            raise ValueError("Invalid adapter response")
+        return response
+    except ValueError as error:
+        raise ProviderUnavailable("Invalid selected-account adapter response") from error
 
 
 def extract_paper(paper: dict, document: dict, root: Path, timeout: float = 300) -> dict:
@@ -235,13 +264,7 @@ def extract_paper(paper: dict, document: dict, root: Path, timeout: float = 300)
                 (requested and requested != document.get("version"))):
             raise ValueError("Unvalidated or mismatched document version")
     env = dict(os.environ)
-    profile_path = env.get("JEPA_PROFILE_PATH")
-    if not profile_path:
-        raise ValueError("JEPA_PROFILE_PATH must point to a centrally resolved profile")
-    profile_bytes = Path(profile_path).read_bytes()
-    profile = json.loads(profile_bytes)
-    if not profile.get("model") or not profile.get("thinking"):
-        raise ValueError("Invalid resolved profile")
+    profile = _resolved_profile(env)
     selected_kinds = {block.get("kind") for block in document["blocks"]}
     primary_warnings = list(document.get("warnings", []))
     if selected_kinds.isdisjoint({"raw_tex", "pdf_text"}):
@@ -251,7 +274,10 @@ def extract_paper(paper: dict, document: dict, root: Path, timeout: float = 300)
     schema = model_schema()
     chunks = chunk_document(document, int(env.get("JEPA_CHUNK_CHARS", "18000")))
     doc_hash = digest(json.dumps(document, sort_keys=True).encode())
-    adapter_hash = digest(Path(env.get("JEPA_MODEL_ADAPTER", str(ADAPTER_PATH))).read_bytes())
+    try:
+        adapter_hash = digest(Path(env.get("JEPA_MODEL_ADAPTER", str(ADAPTER_PATH))).read_bytes())
+    except OSError as error:
+        raise ProviderUnavailable("Selected-account adapter unavailable") from error
     config = {"profile": profile, "provider": env.get("JEPA_PROVIDER"),
               "transport": env.get("JEPA_TRANSPORT", "sse"), "adapter": adapter_hash,
               "prompt": digest(prompt.encode()), "schema": schema, "document": doc_hash,
@@ -265,14 +291,18 @@ def extract_paper(paper: dict, document: dict, root: Path, timeout: float = 300)
     frozen_profile = directory / "profile.json"
     atomic_json(frozen_profile, profile)
     env["JEPA_PROFILE_PATH"] = str(frozen_profile.resolve())
-    records, receipts, failed = [], [], []
+    records, failed, chunk_provenance = [], [], []
     for index, blocks in enumerate(chunks):
         path = directory / f"chunk-{index:05d}.json"
         chunk_doc = {**document, "blocks": blocks}
         if path.exists():
             checkpoint = json.loads(path.read_text())
             record = validate_record(Extraction.model_validate(checkpoint["record"]), chunk_doc)
-            receipts.append(checkpoint["metadata"])
+            metadata = {**checkpoint["metadata"],
+                        "generation_implementation_sha256": checkpoint["metadata"].get(
+                            "generation_implementation_sha256", "unknown-legacy"),
+                        "validation_implementation_sha256": IMPLEMENTATION_SHA}
+            chunk_provenance.append(metadata)
             records.append((index, record))
             continue
         remaining = deadline - time.monotonic()
@@ -293,9 +323,13 @@ def extract_paper(paper: dict, document: dict, root: Path, timeout: float = 300)
                     raise ValueError("Empty extraction is not a processed document chunk")
                 return record
             record = validated_call(payload, chunk_doc, directory, f"{index:05d}", deadline, env, parse_chunk)
-            metadata = {"chunk": index}
+            metadata = {"chunk": index, "generation_implementation_sha256": IMPLEMENTATION_SHA,
+                        "validation_implementation_sha256": IMPLEMENTATION_SHA}
+            chunk_provenance.append(metadata)
             atomic_json(path, {"record": record.model_dump(), "metadata": metadata})
             records.append((index, record))
+        except ProviderUnavailable:
+            raise
         except (ValueError, RuntimeError, KeyError, TimeoutError, subprocess.SubprocessError) as error:
             code = ("deadline" if isinstance(error, subprocess.TimeoutExpired) or isinstance(error, TimeoutError)
                     else "validation_failed" if isinstance(error, ValueError) else "model_call_failed")
@@ -309,6 +343,8 @@ def extract_paper(paper: dict, document: dict, root: Path, timeout: float = 300)
     result.processing = {"job_sha256": job_hash, "document_sha256": doc_hash,
                          "prompt_sha256": config["prompt"], "adapter_sha256": adapter_hash,
                          "profile": profile, "receipts": receipts, "failed_chunks": failed,
+                         "chunk_provenance": chunk_provenance,
+                         "validation_implementation_sha256": IMPLEMENTATION_SHA,
                          "chunks_total": len(chunks), "chunks_validated": len(records),
                          "timestamp": datetime.now(timezone.utc).isoformat()}
     # Prefix chunk-local IDs. Merge only validated objects, never let one chunk
@@ -378,6 +414,8 @@ def extract_paper(paper: dict, document: dict, root: Path, timeout: float = 300)
                     "max_tokens": config["max_tokens"]}, document, directory, "reconcile", deadline, env,
                     parse_reconciliation)
                 atomic_json(reconcile_path, reconciliation.model_dump())
+        except ProviderUnavailable:
+            raise
         except (ValueError, RuntimeError, KeyError, TimeoutError, subprocess.SubprocessError):
             result.processing["reconciliation_failure"] = "reconciliation_failed"
     if reconciliation:
@@ -440,9 +478,7 @@ def interpret_existing(paper: dict, record: dict, document: dict, root: Path,
                    ("block_id", "artifact_sha256", "source_url", "locator", "page")
                    if k != "block_id"}, block_id=block["id"]))
     env = dict(os.environ)
-    profile = json.loads(Path(env["JEPA_PROFILE_PATH"]).read_text())
-    if not profile.get("model") or not profile.get("thinking"):
-        raise ValueError("Invalid resolved profile")
+    profile = _resolved_profile(env)
     prompt = (PROMPT_PATH.parent / "reconcile.txt").read_text()
     config = {"input_record_sha256": original_hash,
               "document_sha256": digest(json.dumps(document, sort_keys=True).encode()),

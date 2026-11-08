@@ -57,6 +57,11 @@ def discover(store, args):
             key=os.environ.get('OPENALEX_API_KEY')
             receipts.append(result_receipt('openalex-references',api.openalex_references(args.openalex_id,enabled=True,api_key=key)))
             receipts.append(result_receipt('openalex-citations',api.openalex_citations(args.openalex_id,enabled=True,api_key=key)))
+        if args.source == 'cached-graph':
+            if not args.file: raise ValueError('--file required')
+            from .local_graph import import_graph, DEFAULT_TERMS
+            stats = import_graph(store, args.file, terms=(args.query,) if args.query else DEFAULT_TERMS, limit=args.limit)
+            receipts.append({'source':'cached-graph','status':'ok',**stats})
         if args.source == 'local':
             if not args.file: raise ValueError('--file required')
             # Original file + query own the persistent cursor, not a temporary filtered copy.
@@ -140,7 +145,8 @@ def _process_child(paper, root, deadline, result_path, usage_path):
             raise ValueError('No grounded extraction')
         atomic_json(result_path, {'output': output})
     except Exception as error:
-        atomic_json(result_path, {'error': type(error).__name__})
+        atomic_json(result_path, {'error': type(error).__name__,
+                                  'stop_run': isinstance(error, extraction.ProviderUnavailable)})
 
 
 def process(store, seconds, max_papers=None, retry_failed=False, ids=None, workers=1):
@@ -172,6 +178,7 @@ def process(store, seconds, max_papers=None, retry_failed=False, ids=None, worke
         jobs.append(store.db.execute("SELECT id FROM jobs WHERE work_id=? AND manifestation_id=? AND stage='process' AND fingerprint='v1'", (paper['work_id'], mid)).fetchone()[0])
     active = {}
     events = []
+    provider_failed = False
     ctx = multiprocessing.get_context('fork')
     previous_term = signal.getsignal(signal.SIGTERM)
     def stop_run(_signum, _frame):
@@ -212,6 +219,13 @@ def process(store, seconds, max_papers=None, retry_failed=False, ids=None, worke
                 store.finish(jid, result.get('error'), lease_until=job['lease_until'])
                 events.append(event)
                 del active[jid]
+                if result.get('stop_run'):
+                    provider_failed = True
+                    events.append({'status': 'stopped', 'reason': 'provider unavailable',
+                                   'remote_usage': 'unknown'})
+                    break
+            if provider_failed:
+                break
             time.sleep(min(.02, max(0, deadline-time.monotonic()-.2)))
     except KeyboardInterrupt:
         events.append({'status':'stopped','reason':'operator signal','remote_usage':'unknown'})
@@ -246,9 +260,10 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--root',type=Path,default=Path('runtime'));ap.add_argument('--env-file',type=Path)
     sub=ap.add_subparsers(dest='command',required=True)
-    d=sub.add_parser('discover');d.add_argument('--source',choices=['core','curated','seeds','hf','arxiv','daily','alphaxiv','openalex','local'],default='core')
+    d=sub.add_parser('discover');d.add_argument('--source',choices=['core','curated','seeds','hf','arxiv','daily','alphaxiv','openalex','local','cached-graph'],default='core')
     d.add_argument('--query');d.add_argument('--date');d.add_argument('--file',type=Path);d.add_argument('--openalex-id');d.add_argument('--limit',type=int,default=100);d.add_argument('--hydrate',action='store_true')
     s=sub.add_parser('screen');s.add_argument('--seconds',type=int,default=180);s.add_argument('--limit',type=int,default=100)
+    i=sub.add_parser('review-identities');i.add_argument('--seconds',type=int,default=180);i.add_argument('--limit',type=int,default=20)
     r=sub.add_parser('run');r.add_argument('--seconds',type=int,required=True);r.add_argument('--max-papers',type=int);r.add_argument('--workers',type=int,default=1);r.add_argument('--retry-failed',action='store_true');r.add_argument('--ids',nargs='+')
     e=sub.add_parser('export');e.add_argument('--output',type=Path,default=Path('site/public/data'))
     sub.add_parser('status')
@@ -258,6 +273,9 @@ def main():
     try:
         if args.command=='discover':discover(store,args)
         elif args.command=='screen':screen(store,args.seconds,args.limit)
+        elif args.command=='review-identities':
+            from .identity_review import review_candidates
+            print(json.dumps(review_candidates(store,seconds=args.seconds,limit=args.limit),indent=2))
         elif args.command=='run':print(json.dumps(process(store,args.seconds,args.max_papers,args.retry_failed,args.ids,args.workers),indent=2))
         elif args.command=='export':print(json.dumps(export_catalog(store,args.output)['coverage'],indent=2))
         else:print(json.dumps(store.stats(),indent=2))

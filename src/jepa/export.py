@@ -90,7 +90,9 @@ def export_catalog(store, destination: Path):
     destination.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix='.export-', dir=destination.parent))
     try:
-        papers = [public_paper(p) for p in store.papers() if p.get('title') and p['relevance'] != 'excluded']
+        quarantined = {row[0] for row in store.db.execute('SELECT work_id FROM identity_conflicts')}
+        papers = [public_paper(p) for p in store.papers() if p.get('title')
+                  and p['relevance'] != 'excluded' and p['work_id'] not in quarantined]
         ids = {p['work_id'] for p in papers}
         edges = [dict(r) for r in store.db.execute('SELECT source,target,provider,relation FROM citation_edges')
                  if r['source'] in ids and r['target'] in ids]
@@ -100,6 +102,7 @@ def export_catalog(store, destination: Path):
                     'complete': sum(bool(p['extraction']) and p['extraction']['completeness']=='complete' for p in papers),
                     'scope': 'Continuous discovery; source coverage and extraction remain incomplete.',
                     'excluded': sum(p['relevance']=='excluded' for p in store.papers()),
+                    'identity_conflicts_pending': len(quarantined),
                     'source_configuration': 'Not audited by public export; presence in sources records observation only.',
                     'not_yet_implemented': ['Semantic Scholar', 'Crossref', 'venue-wide OpenReview discovery']}
         catalog = {'schema_version': '1.0', 'generated_at': datetime.now(timezone.utc).isoformat(),

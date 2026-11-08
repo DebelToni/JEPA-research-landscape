@@ -7,8 +7,8 @@ A continuously growing catalogue of JEPA and related predictive/world-model rese
 ## Implemented
 
 - arXiv search and version metadata, Hugging Face Papers, curated arXiv link imports, optional alphaXiv MCP and quota-limited OpenAlex citation discovery.
-- Streaming local arXiv metadata JSONL import, with persisted offsets. Large snapshots are never downloaded automatically.
-- SQLite identity/source/version ledger, explicit identifier-conflict quarantine, FTS5, resumable jobs and citation edges. Bibliography links provide citation discovery without spending OpenAlex requests.
+- Streaming local arXiv metadata JSONL import with filtering and persisted offsets, plus read-only import from retained scholarly SQLite graphs. Large snapshots are never downloaded automatically.
+- SQLite identity/source/version ledger, identifier-conflict quarantine, proposal-only AI identity reviews, FTS5, resumable jobs and citation edges. Bibliography links provide citation discovery without spending OpenAlex requests.
 - Sandboxed LaTeX/HTML/PDF acquisition and structured document blocks. HTML tables preserve row/cell spans; raw LaTeX and low-fidelity PDF extraction remain explicitly flagged.
 - Selected-account Codex calls through Pi, chunk checkpoints, bounded validation repairs and within-paper reconciliation. Contributions, questions, mechanisms, assumptions, theory, limitations, future work, hypotheses, experimental findings and artifacts are structured JSON. Findings explain the results and retain a few decisive numbers, rather than reproducing full source tables.
 - Source-location and literal-value checks, provisional rubric scores, separate relevance and extraction status. AI source checks are not independent reproduction or human review.
@@ -19,7 +19,7 @@ A continuously growing catalogue of JEPA and related predictive/world-model rese
 
 This is a working research pipeline, not a complete census or a verified experimental database. Records can be metadata-only or partially extracted; review and completeness fields are explicit. Queries and graph frontiers are resumable. Citation counts are not quality scores, and negative results are not discarded for failing to beat a baseline.
 
-PDF-only parsing currently uses bounded `pdftotext`, not Docling or visual table verification. Code/dataset links are assertions unless their recorded availability says otherwise; paper code is never executed. General venue harvesting, Semantic Scholar/Crossref adapters, AI-assisted ambiguous-identity adjudication and reversible curator merge/split operations remain unimplemented. Conflicting identifiers are retained separately. Cross-paper scientific synthesis is outside scope.
+PDF-only parsing currently uses bounded `pdftotext`, not Docling or visual table verification. Code/dataset links are assertions unless their recorded availability says otherwise; paper code is never executed. General venue harvesting, Semantic Scholar/Crossref adapters and reversible curator merge/split operations remain unimplemented. AI identity reviews are bibliographic proposals, not automatic merges; conflicting identities remain private pending resolution. Cross-paper scientific synthesis is outside scope.
 
 ## Run locally
 

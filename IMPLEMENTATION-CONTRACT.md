@@ -1,6 +1,6 @@
 # Implementation contract
 
-2026-11-07. Parallel implementation ownership and shared interfaces. PLAN.md is the research design; this file pins the initial executable interfaces. No fake data in production.
+Shared interfaces, updated 2026-11-08. PLAN.md is the research design; `src/jepa/models.py` and the exported JSON Schema are authoritative for record fields. No synthetic data in production.
 
 ## Runtime
 
@@ -27,12 +27,12 @@ Extraction record shape for site and exports:
 
 Public dataset: `/data/catalog.json` = `{schema_version:'1.0', generated_at, papers:[public work], edges:[{source:work_id,target:work_id,provider,relation:'cites'}], coverage:{...}}`. Public work contains work_id, title, authors, published, updated, arxiv_id, version, doi, url, relevance, topics, status, extraction (public-safe shape above), sources (provider names only). Public paper record at `/data/papers/<work_id>.json`; Markdown optional. `/data/manifest.json` contains release hashes/counts and coverage. `/data/schema.json` describes extraction schema. UI must tolerate discovered records with extraction null and partial extraction. No sample records silently substituted for empty data.
 
-## Ownership and APIs
+## Module boundaries
 
-Core agent owns `src/jepa/store.py`, `src/jepa/sources.py`, `tests/test_store.py`, `tests/test_sources.py`, `config/seeds.json`, `config/queries.json` only. Store(root: Path) methods: ingest(record)->work_id; get(work_id)->dict; papers()->list[dict]; set_extraction(work_id, extraction)->None; set_status(work_id,status)->None; enqueue(work_id,stage,fingerprint='v1')->None; claim(stage,lease_seconds=900)->dict|None (includes id,work_id); finish(job_id,error=None)->None; stats()->dict. Expose connection as `db` if integration needs explicit SQL. Sources module emits record dicts. Define/document callable discovery interfaces in module docstrings. Persist API pagination and quota ledgers using store.db. No CLI ownership.
-
-Extraction agent owns `src/jepa/extract.py`, `src/jepa/documents.py`, `src/jepa/models.py`, `scripts/model-call.mjs`, `tests/test_extraction.py`, `tests/test_documents.py`, `tests/model-call.test.mjs`, `prompts/` only. API `acquire_and_parse(paper:dict, root:Path, timeout:float=120)->dict` document (blocks, artifacts and warnings); `extract_paper(paper:dict, document:dict, root:Path, timeout:float=300)->dict` extraction using configurable selected-account model adapter. Make chunking explicit; no silent truncation. Keep intermediate results for resumption. Export schema via Pydantic. Safe parsing, actual version identity, precise evidence, constrained model calls. Read installed Pi docs before adapter implementation. Parameterize Pi runtime/account/model path, no committed private paths. No downloading huge GPU models; source/HTML first, bounded PDF fallback with explicit parser quality warning if Docling unavailable.
-
-Site agent owns `site/` except generated `site/public/data/`, `tests/browser/`, and frontend-only package files. React/TypeScript static build, paper routes /papers/<uuid>/ (prerender if practical), responsive search/facets, paper evidence and experiment tables, local citation graph using Cytoscape, dataset links, source links and methodology. Minimal light design, no hero or ornamental dashboards. No backend, accounts or unrequested social features. Build consumes real catalog.json; synthetic fixtures only in tests. Site code must never execute source HTML. Relative same-origin asset URLs. Canonical public domain jepa.toni.foo, intended repo https://github.com/DebelToni/JEPA-research-landscape. Package manager npm.
-
-Main agent owns pyproject.toml, CLI/orchestration, exports, integration tests, docs, deployment and publication. Other agents must not change shared interfaces without reporting exact changes. Do not commit or publish independently.
+- `store.py`: work/version/source ledger, append-only extractions and fenced jobs. `Store(root)` owns the database; `claim` can be scoped to job IDs, and concurrent completion must supply its lease token. Source adapters persist cursors and quotas through `store.db`.
+- `documents.py`: `acquire_and_parse(paper, root, timeout=120)` returns blocks, immutable artifacts and explicit parser/coverage warnings. Cache paths include parser versions. Source is never executed.
+- `extract.py`: `extract_paper(paper, document, root, timeout=300)` performs checkpointed chunk extraction and within-paper reconciliation. `interpret_existing` converts historical detailed records to findings without claiming new source verification. The model emits block references and quotes; the host supplies immutable location metadata.
+- `identity_review.py`: bounded bibliographic proposals only; no implicit identity, source or score mutations.
+- `export.py` and `scripts/publish.py`: field-allowlisted public data, private backups, integrity-checked static promotion. Public builds reject legacy rows, unexpected roots and unmanifested data.
+- `site/`: React/TypeScript prerendered catalogue and `/papers/<uuid>/` routes, findings and source links, local observed-citation graph, methodology and downloads. No public model/processing endpoint. Source markup is never executed; math rendering is untrusted. Synthetic fixtures remain isolated from production.
+- `cli.py`: manual discovery, screening, identity review, time-bounded parallel processing, status and export. No recurring timer. `OPERATIONS.md` owns runtime configuration and recovery.
