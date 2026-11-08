@@ -7,6 +7,19 @@ test('catalogue, paper, graph, downloads and methodology',async({page,request})=
 });
 test('synthetic contract: null extraction, facets and unsafe evidence',async({page})=>{test.skip(!!process.env.BASE_URL,'Fixture assertions only');await page.goto('/');await page.getByLabel('Category',{exact:true}).selectOption('robotics');await expect(page.getByRole('status')).toHaveText('1 papers');await page.getByRole('link',{name:'Synthetic latent prediction',exact:true}).click();await expect(page.locator('.key-result strong')).toHaveText('0');await expect(page.getByText('Limited to the synthetic setting.')).toBeVisible();await expect(page.locator('.katex')).toBeVisible();await expect(page.locator('.key-result')).toContainText('Named predictor');await expect(page.locator('article')).toContainText('75/100');await expect(page.locator('table')).toHaveCount(0);expect(await page.locator('body').evaluate(el=>el.scrollWidth<=window.innerWidth)).toBeTruthy();await expect(page.locator('article img')).toHaveCount(0);await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);await page.getByRole('link',{name:'[e1]',exact:true}).first().click();await expect(page.locator('#evidence-e1')).toContainText('Table 1');await page.getByRole('link',{name:'[c0:e2]',exact:true}).first().click();await expect(page.locator('[id="evidence-c0:e2"] a')).toHaveAttribute('href','https://example.org/paper/source.tex#L20');await page.goto('/papers/33333333-3333-4333-8333-333333333333/');await expect(page.getByText('Experimental interpretation pending.')).toBeVisible();await expect(page.getByText('Private exhaustive row')).toHaveCount(0);await page.goto('/papers/22222222-2222-4222-8222-222222222222/');await expect(page.getByText('Not yet extracted. No appraisal is available.')).toBeVisible();});
 
+test('filters wait for the browser index before accepting input',async({page})=>{
+ test.skip(!!process.env.BASE_URL,'Fixture readiness gate');
+ let release!:()=>void;
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ await page.route('**/catalog-index.json',async route=>{await gate;await route.continue();});
+ await page.goto('/');
+ await expect(page.getByLabel('Category',{exact:true})).toBeDisabled();
+ release();
+ await expect(page.getByLabel('Category',{exact:true})).toBeEnabled();
+ await page.getByLabel('Category',{exact:true}).selectOption('science');
+ await expect(page.getByLabel('Subcategory',{exact:true})).toBeVisible();
+});
+
 test('cascading categories include descendants, count once and reset children',async({page})=>{
  test.skip(!!process.env.BASE_URL,'Fixture assertions only');
  await page.goto('/');

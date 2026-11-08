@@ -12,7 +12,7 @@ def publish(build: Path, root: Path):
     build=build.resolve();root=root.resolve()
     manifest_path=build/'data/manifest.json'
     manifest=json.loads(manifest_path.read_text())
-    allowed_roots={'index.html','assets','data','papers','methodology','THIRD-PARTY-LICENSES.txt'}
+    allowed_roots={'index.html','catalog-index.json','assets','data','papers','methodology','THIRD-PARTY-LICENSES.txt'}
     if any(path.name not in allowed_roots for path in build.iterdir()):
         raise ValueError('Unexpected build root, possibly a private backup')
     actual={str(path.relative_to(build/'data')) for path in (build/'data').rglob('*') if path.is_file()}

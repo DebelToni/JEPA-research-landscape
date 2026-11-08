@@ -10,6 +10,14 @@ const data=JSON.parse(await readFile(resolve('public/data/catalog.json'),'utf8')
 if(data.schema_version!=='1.0'||!Array.isArray(data.papers))throw Error('Unsupported catalogue schema');
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 if(data.papers.some(p=>!uuid.test(p.work_id)))throw Error('Invalid work UUID');
+// Browser retrieval view: the scientific catalogue remains the canonical export.
+const index={...data,view:'browser-index',papers:data.papers.map(p=>{
+ const {extraction:e,classification,...metadata}=p;
+ return {...metadata,search_text:[...(e?.keywords||[]),...(e?.sections?.mechanism||[]).map(c=>c.text)].join(' '),
+  extraction:e?{summary:e.summary,completeness:e.completeness,artifacts:e.artifacts,
+   quality:e.quality?{score:e.quality.score,coverage:e.quality.coverage,rubric:e.quality.rubric}:undefined}:null};
+})};
+await writeFile(resolve(root,'catalog-index.json'),JSON.stringify(index));
 const template=await readFile(resolve(root,'index.html'),'utf8');
 for(const path of ['/', '/methodology/', ...data.papers.map(p=>`/papers/${p.work_id}/`)]) {
  const html=renderToString(createElement(App,{data,path}));

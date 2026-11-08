@@ -48,7 +48,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json_response(self.api.respond(path, parsed.query, Path(self.directory)))
             except APIError as error:
                 return self.json_response({'error': {'code': error.code, 'message': error.message}}, error.status)
-        allowed_roots = {'', 'healthz', 'index.html', 'assets', 'data', 'papers', 'methodology', 'THIRD-PARTY-LICENSES.txt'}
+        allowed_roots = {'', 'healthz', 'index.html', 'catalog-index.json', 'assets', 'data', 'papers', 'methodology', 'THIRD-PARTY-LICENSES.txt'}
         if (path.lstrip('/').split('/')[0] not in allowed_roots or '\\' in path
                 or any(p.startswith('.') or p.endswith('.previous') for p in path.split('/') if p)):
             self.send_error(404)
