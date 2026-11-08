@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "arxiv_ids": [
+    "2301.08243",
+    "2506.09985",
+    "2603.14482",
+    "2202.03555",
+    "2105.04906",
+    "2301.04104",
+    "2310.16828",
+    "2610.06805",
+    "2608.09771",
+    "2410.24164",
+    "2506.21539",
+    "2511.17502",
+    "2610.00575",
+    "2610.12818",
+    "2402.15391",
+    "2501.03575",
+    "2511.00062",
+    "2010.08895",
+    "2111.03794",
+    "2511.10829",
+    "1509.03580",
+    "2402.07594",
+    "2511.08544",
+    "2411.04983",
+    "2609.16071"
+  ],
+  "links": [
+    "https://openreview.net/forum?id=QaCCuDfBk2"
+  ],
+  "curated_lists": [
+    "https://raw.githubusercontent.com/AbdelStark/awesome-jepa/main/README.md"
+  ],
+  "policy": "22 proposed anchors plus confirmed additions from PLAN.md. IDs are discovery seeds, not verified versions or relevance judgments. Resolve primary metadata and screen before extraction. CNC is not prejudged. Original V-JEPA OpenReview link requires a separate adapter."
+}

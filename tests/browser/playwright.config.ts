@@ -1,0 +1,2 @@
+import {defineConfig} from '../../site/node_modules/@playwright/test';
+export default defineConfig({testDir:'.',testMatch:'*.spec.ts',use:{baseURL:process.env.BASE_URL||'http://127.0.0.1:4179',headless:true},webServer:process.env.BASE_URL?undefined:{cwd:require('node:path').resolve(__dirname,'../../site'),command:'node ../tests/browser/server.mjs',url:'http://127.0.0.1:4179',reuseExistingServer:false,gracefulShutdown:{signal:'SIGTERM',timeout:5000}},projects:[{name:'desktop',use:{viewport:{width:1280,height:900}}},{name:'mobile',use:{viewport:{width:390,height:844}}}]});

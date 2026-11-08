@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "arxiv": [
+    "all:\"joint embedding predictive\" OR all:\"joint-embedding predictive\" OR all:JEPA",
+    "all:\"action-conditioned\" AND (all:\"world model\" OR all:\"latent dynamics\")",
+    "all:\"predictive representations\" OR all:\"predictive latent state\"",
+    "all:\"predictive VLA\" OR (all:\"neural operator\" AND all:\"physical dynamics\")",
+    "all:\"masked prediction\" AND all:\"latent representations\"",
+    "all:\"self-supervised\" AND all:\"future representation\" AND all:video",
+    "all:\"predictive coding\" AND all:dynamics",
+    "all:\"world model\" AND all:\"model predictive control\"",
+    "all:\"model based reinforcement learning\" AND all:\"imagined rollout\"",
+    "all:\"vision language action\" AND all:\"world model\"",
+    "all:\"interactive\" AND all:\"generative\" AND all:\"world model\"",
+    "all:\"action conditioned\" AND all:\"video prediction\"",
+    "all:\"neural operator\" AND all:\"time dependent\"",
+    "all:\"system identification\" AND all:\"nonlinear dynamics\"",
+    "all:\"learned simulator\" AND (all:conservation OR all:control)"
+  ],
+  "huggingface": [
+    "JEPA",
+    "joint embedding predictive",
+    "latent world model"
+  ],
+  "policy": "Broad candidates require explicit relevance screening. Add bounded arXiv update windows for refresh. No coverage guarantee."
+}
