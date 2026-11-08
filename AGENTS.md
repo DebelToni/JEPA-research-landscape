@@ -4,6 +4,7 @@ Read README.md, OPERATIONS.md and PLAN.md before work. README/OPERATIONS record 
 
 - The pipeline, public repository and jepa.toni.foo are deployed. Recheck current run receipts and deployment state; do not report unimplemented roadmap items as completed.
 - `/llms.txt` and `/openapi.json` describe the public agent API. Keep all API queries confined to the immutable published snapshot, never the private working DB. Code changes require an origin restart; data publication refreshes the in-memory index automatically.
+- The website and read-only API stay online independently of AI processing. Requests to stop digging, workers or processing for maintenance do not authorize stopping `jepa-landscape-site.service`; stopping public serving requires an explicit request about the site/API.
 - Continuous curation, manually started time-budgeted processing. No fixed corpus stages or mandatory pilot. Keep quality checks within ordinary processing.
 - For isolated operational interruptions, rerun first instead of starting a debugging/hardening project. Investigate repeated blockers, not every small error. Explicit authentication/quota denials still require respecting the provider's limits.
 - Intended publication is a public GitHub repository plus jepa.toni.foo. Separate public source/allowed exports from private runtime data before initializing publication.
