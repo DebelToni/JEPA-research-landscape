@@ -14,6 +14,9 @@ ProtectSystem=strict
 ProtectHome=read-only
 RestrictAddressFamilies=AF_INET AF_INET6
 UMask=0077
+MemoryMax=768M
+TasksMax=64
+LimitNOFILE=512
 
 [Install]
 WantedBy=default.target

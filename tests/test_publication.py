@@ -3,9 +3,8 @@ import json
 from pathlib import Path
 import threading
 from functools import partial
-from http.server import ThreadingHTTPServer
 import httpx
-from jepa.serve import Handler
+from jepa.serve import Handler, PublicServer
 from jepa.citations import bibliography_ids
 
 
@@ -19,7 +18,7 @@ def test_static_origin_boundaries(tmp_path):
     (root/'data').mkdir();(root/'data/manifest.json').write_text(json.dumps({'schema_version':'1.0','coverage':{'papers':2,'extracted':1},'generated_at':'now'}))
     (root/'.env').write_text('SECRET');outside=tmp_path/'secret';outside.write_text('SECRET');(root/'escape').symlink_to(outside)
     (root/'data.previous').mkdir();(root/'data.previous/catalog.json').write_text('PRIVATE_LEGACY_ROWS')
-    server=ThreadingHTTPServer(('127.0.0.1',0),partial(Handler,publication=root))
+    server=PublicServer(('127.0.0.1',0),partial(Handler,publication=root))
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
     try:
         with httpx.Client(base_url=f'http://127.0.0.1:{server.server_port}',trust_env=False) as c:
@@ -29,7 +28,7 @@ def test_static_origin_boundaries(tmp_path):
             assert c.get('/data.previous/catalog.json').status_code==404
             assert c.get('/data/').status_code==404
             assert c.get('/escape').status_code==404
-            assert c.post('/run').status_code==501
+            assert c.post('/run').status_code==405
             assert c.get('/').headers['cache-control']=='no-cache'
             assert "script-src 'self'" in c.get('/').headers['content-security-policy']
     finally:

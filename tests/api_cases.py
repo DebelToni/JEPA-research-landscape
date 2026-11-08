@@ -303,6 +303,89 @@ def test_taxonomy_filters_and_unique_rollups(service):
     assert 'Unknown category ID' in c.get('/api/search?category=missing').json()['error']['message']
 
 
+def test_http_validators_compression_and_cached_snapshot(service, monkeypatch):
+    c, _, link, api = service
+    response = c.get('/api/search', headers={'Accept-Encoding': 'gzip'})
+    assert response.headers['content-encoding'] == 'gzip'
+    assert int(response.headers['content-length']) < len(response.content)
+    etag = response.headers['etag']
+    original = api.respond
+    monkeypatch.setattr(api, 'respond', lambda *args: pytest.fail('Cache hit rebuilt a response'))
+    cached = c.get('/api/search', headers={'If-None-Match': 'W/'+etag, 'Accept-Encoding': 'gzip'})
+    assert cached.status_code == 304 and not cached.content
+    assert c.head('/api/search', headers={'Accept-Encoding': 'gzip'}).headers['etag'] == etag
+    identity = c.get('/api/search', headers={'Accept-Encoding': 'gzip;q=0'})
+    assert 'content-encoding' not in identity.headers and identity.json() == response.json()
+    assert identity.headers['etag'] != etag
+    monkeypatch.setattr(api, 'respond', original)
+    promote(link)
+    changed = c.get('/api/search', headers={'If-None-Match': etag, 'Accept-Encoding': 'gzip'})
+    assert changed.status_code == 200 and changed.headers['etag'] != etag
+    assert c.get('/api/search', params={'snapshot': response.json()['snapshot']['id']}).status_code == 409
+
+
+def test_static_gzip_is_private_and_conditional(service):
+    import gzip
+    c, _, link, _ = service
+    original = (link/'data/catalog.json').read_bytes()
+    sidecar = link/'.http/data/catalog.json.gz'
+    sidecar.parent.mkdir(parents=True)
+    sidecar.write_bytes(gzip.compress(original, mtime=0))
+    response = c.get('/data/catalog.json', headers={'Accept-Encoding': 'gzip'})
+    assert response.content == original and response.headers['content-encoding'] == 'gzip'
+    assert c.get('/data/catalog.json', headers={'If-None-Match': response.headers['etag'], 'Accept-Encoding': 'gzip'}).status_code == 304
+    # Second-resolution dates cannot distinguish publications within a second.
+    # ETags are authoritative; date-only conditionals conservatively return 200.
+    assert c.get('/data/catalog.json', headers={'If-Modified-Since': response.headers['last-modified'], 'Accept-Encoding': 'gzip'}).status_code == 200
+    assert c.get('/.http/data/catalog.json.gz').status_code == 404
+    assert c.get('/assets/missing.js').headers['cache-control'] == 'no-store'
+    sidecar.unlink();sidecar.symlink_to(link.parent/'private/secret')
+    assert c.get('/data/catalog.json', headers={'Accept-Encoding': 'gzip'}).status_code == 404
+
+
+def test_request_limits_are_per_client_and_machine_readable(service, monkeypatch):
+    from jepa.http_cache import ClientBudgets
+    monkeypatch.setattr(ClientBudgets, 'request_burst', 2)
+    monkeypatch.setattr(ClientBudgets, 'request_rate', .001)
+    c, _, _, _ = service
+    assert c.get('/api').status_code == 200
+    assert c.get('/api').status_code == 200
+    response = c.get('/api')
+    assert response.status_code == 429 and int(response.headers['retry-after']) > 0
+    assert response.json()['error']['code'] == 'rate_limited'
+    assert response.headers['cache-control'] == 'no-store'
+    assert c.get('/api', headers={'CF-Connecting-IP': '198.51.100.2'}).status_code == 200
+    assert c.get('/api/search?q='+'x'*8200, headers={'CF-Connecting-IP': '198.51.100.3'}).status_code == 414
+
+
+def test_download_limits_do_not_charge_head_or_304(service, monkeypatch):
+    from jepa.http_cache import ClientBudgets
+    monkeypatch.setattr(ClientBudgets, 'byte_burst', 1)
+    monkeypatch.setattr(ClientBudgets, 'byte_rate', .001)
+    c, _, _, _ = service
+    response = c.get('/api')
+    assert response.status_code == 200  # A response larger than the burst remains downloadable.
+    assert c.get('/api').status_code == 429
+    assert c.head('/api').status_code == 200
+    assert c.get('/api', headers={'If-None-Match': response.headers['etag']}).status_code == 304
+
+
+def test_cache_and_client_state_are_bounded():
+    from jepa.http_cache import ClientBudgets, ResponseCache, Document
+    cache = ResponseCache(max_bytes=100, max_entries=2)
+    first = Document(b'a'*60, 'text/plain')
+    cache.put('a', first);cache.put('b', first)
+    assert cache.get('a') is None and cache.size == 60
+    cache.put('oversized', Document(b'x'*101, 'text/plain'))
+    assert cache.get('oversized') is None
+    budgets = ClientBudgets();budgets.max_clients = 2
+    assert budgets.charge('a', requests=80, now=0) == 0
+    assert budgets.charge('a', requests=1, now=0) == 1
+    assert budgets.charge('a', requests=1, now=1) == 0
+    for client in ('b', 'c'): budgets.charge(client, requests=1, now=1)
+    assert len(budgets.clients) == 2
+
+
 def test_legacy_snapshot_without_taxonomy(published):
     link, _ = published
     path = link/'data/catalog.json'

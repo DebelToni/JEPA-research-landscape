@@ -78,6 +78,13 @@ class Snapshot:
         self.coverage = catalog['coverage']
         self.papers = catalog['papers']
         self.by_id = {p['work_id']: p for p in self.papers}
+        self.paper_categories = tuple(frozenset(self.categories(p)) for p in self.papers)
+        counts = Counter({category: 0 for category in self.category_nodes})
+        for categories in self.paper_categories:
+            counts.update(categories)
+        self.counts = dict(sorted(counts.items()))
+        self.summaries = {p['work_id']: self.summary(p) for p in self.papers}
+        self.facet_response = self._build_facets()
         self.edges = catalog['edges']
         self.outgoing, self.incoming = defaultdict(list), defaultdict(list)
         for i, edge in enumerate(self.edges):
@@ -106,10 +113,7 @@ class Snapshot:
         return result
 
     def category_counts(self):
-        counts = Counter({category: 0 for category in self.category_nodes})
-        for paper in self.papers:
-            counts.update(self.categories(paper))
-        return dict(sorted(counts.items()))
+        return self.counts
 
     def taxonomy_response(self):
         return {'snapshot': self.meta, 'taxonomy': self.taxonomy, 'counts': self.category_counts()}
@@ -178,7 +182,7 @@ class Snapshot:
             if extracted is not None and (e is not None) != extracted: continue
             if rated is not None and (score is not None) != rated: continue
             if relevance and p['relevance'] != relevance: continue
-            if category is not None and category not in self.categories(p): continue
+            if category is not None and category not in self.paper_categories[i]: continue
             if classification is not None and (p.get('classification') or {}).get('status') != classification: continue
             if 'topic' in params and params['topic'] not in (p.get('topics') or []): continue
             if 'source' in params and params['source'] not in (p.get('sources') or []): continue
@@ -193,11 +197,14 @@ class Snapshot:
                 return (score is None, -score if score is not None else 0, p['work_id'])
             matches.sort(key=score_key)
         result = self.page('/api/search', params, matches, limit, offset)
-        result['results'] = [self.summary(p) for p in result['results']]
+        result['results'] = [self.summaries[p['work_id']] for p in result['results']]
         result.update(query=q, sort=sort)
         return result
 
     def facets(self):
+        return self.facet_response
+
+    def _build_facets(self):
         counters = {key: Counter() for key in ('relevance', 'topic', 'source', 'year')}
         extracted = rated = 0
         for p in self.papers:
@@ -221,7 +228,7 @@ class Snapshot:
         if direction != 'incoming': indices.update(self.outgoing[work_id])
         if direction != 'outgoing': indices.update(self.incoming[work_id])
         result = self.page(f'/api/papers/{work_id}/citations', params, sorted(indices), limit, offset)
-        result['results'] = [{'edge': self.edges[i], 'paper': self.summary(self.by_id[self.edges[i]['target'] if self.edges[i]['source'] == work_id else self.edges[i]['source']])} for i in result['results']]
+        result['results'] = [{'edge': self.edges[i], 'paper': self.summaries[self.edges[i]['target'] if self.edges[i]['source'] == work_id else self.edges[i]['source']]} for i in result['results']]
         result.update(work_id=work_id, direction=direction)
         return result
 
@@ -263,7 +270,7 @@ class AgentAPI:
         if path == '/api/facets': return snapshot.facets()
         if path == '/api':
             return {'service': 'jepa-landscape', 'api_version': '1', 'snapshot': snapshot.meta, 'coverage': snapshot.coverage,
-                    'endpoints': {'search': '/api/search', 'facets': '/api/facets', 'taxonomy': '/api/taxonomy', 'paper': '/api/papers/{work_id}', 'citations': '/api/papers/{work_id}/citations', 'instructions': '/llms.txt', 'openapi': '/openapi.json'},
+                    'endpoints': {'search': '/api/search', 'facets': '/api/facets', 'taxonomy': '/api/taxonomy', 'paper': '/api/papers/{work_id}', 'citations': '/api/papers/{work_id}/citations', 'instructions': '/llms.txt', 'openapi': '/openapi.json', 'bulk_papers': '/data/papers.jsonl', 'bulk_catalogue': '/data/catalog.json', 'manifest': '/data/manifest.json', 'sitemap': '/sitemap.xml'},
                     'limitations': ['AI assessments are provisional; source matching is not semantic or human verification.', 'Metadata-only and partial records are included. Missing scores are unknown, not zero.', 'Citation edges are observed links within this published collection, not a complete citation graph.', 'Search is lexical, not semantic. Working data appears only after publication.']}
         paper = snapshot.by_id.get(match[1])
         if paper is None:

@@ -27,4 +27,7 @@ for(const path of ['/', '/methodology/', ...data.papers.map(p=>`/papers/${p.work
  const dir=resolve(root,'.'+path);await mkdir(dir,{recursive:true});
  await writeFile(resolve(dir,'index.html'),pageTemplate.replace('<div id="root"></div>',()=>`<div id="root">${html}</div>`));
 }
+await writeFile(resolve(root,'robots.txt'),'User-agent: *\nAllow: /\nSitemap: https://jepa.toni.foo/sitemap.xml\n');
+const urls=['/', '/methodology/', ...data.papers.map(p=>`/papers/${p.work_id}/`)];
+await writeFile(resolve(root,'sitemap.xml'),'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+urls.map(path=>`<url><loc>https://jepa.toni.foo${path}</loc></url>`).join('')+'</urlset>\n');
 console.log(`Prerendered ${data.papers.length} paper pages, catalogue and methodology`);

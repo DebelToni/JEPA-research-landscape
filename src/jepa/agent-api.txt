@@ -51,7 +51,17 @@ Responses identify the immutable public catalogue in snapshot.id, generated_at a
 
 If publication changes between requests, a pinned request returns HTTP 409 (snapshot_changed). Restart the search on the current snapshot; do not silently combine pages from different snapshots. HTML and static download links are unpinned and always refer to the current publication.
 
-Errors are JSON: {"error":{"code":"...","message":"..."}}. Invalid/unknown/repeated parameters return 400, unknown papers/routes 404, snapshot conflicts 409, and unavailable/corrupt public snapshots or a busy server 503. A busy response includes Retry-After. Non-read methods on API routes return 405. Public API/data responses allow cross-origin reads without credentials.
+Errors are JSON: {"error":{"code":"...","message":"..."}}. Invalid/unknown/repeated parameters return 400, unknown papers/routes 404, snapshot conflicts 409, oversized request targets 414, client fairness limits 429, and unavailable/corrupt public snapshots or a busy server 503. Limits and busy responses include Retry-After in seconds. Non-read methods on API routes return 405. Public API/data responses allow cross-origin reads without credentials.
+
+## Efficient crawling
+
+For the whole collection, download /data/papers.jsonl or /data/catalog.json once instead of issuing one API request per paper. Send Accept-Encoding: gzip; standard HTTP libraries decompress automatically. /data/manifest.json hashes apply to the decompressed file bytes. For multiple tables, retain the manifest, verify each file hash, and restart on a mismatch after publication changes.
+
+Retain ETag and send If-None-Match with the same Accept-Encoding on later reads. HTTP 304 has no body; reuse the saved representation. Current-publication aliases always revalidate, so cached API pages cannot silently bypass snapshot conflicts. Last-Modified is informational; use ETag for conditional requests.
+
+Use at most four concurrent requests and about ten requests/second. Honor Retry-After on 429 or 503, adding jitter rather than retrying in a tight loop. Origin fairness limits per client are 20 requests/second with an 80-request burst, and 8 MiB/second of response bytes with a 64 MiB burst; a single larger response is allowed and charged against later reads. IPv6 addresses share a /64 budget. HEAD and 304 consume request budget but no download budget. Shared NAT/proxy users share a budget; these are capacity controls, not guaranteed throughput. The origin admits at most 32 concurrent connections.
+
+HTML is prerendered and readable without JavaScript. /robots.txt permits crawling and /sitemap.xml lists canonical catalogue, methodology and paper pages. No browser fingerprint or special User-Agent is required for normal public reads.
 
 ## Bulk access and rights
 

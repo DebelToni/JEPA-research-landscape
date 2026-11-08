@@ -71,9 +71,10 @@ SEARCH = [parameter('q', {'type': 'string', 'maxLength': 500}, 'Plain lexical se
 
 
 def operation(name, summary, schema, params):
-    return {'operationId': name, 'summary': summary, 'parameters': params,
-            'responses': {'200': {'description': 'Public snapshot data. Relative links resolve against the service URL.', 'headers': {'X-JEPA-Snapshot': {'description': 'Catalogue content hash.', 'schema': STRING}}, 'content': {'application/json': {'schema': ref(schema)}}},
-                          **{str(status): {'description': text, 'content': {'application/json': {'schema': ref('Error')}}} for status, text in ((400, 'Invalid query'), (404, 'Unknown route or paper'), (409, 'Published snapshot changed'), (405, 'Read-only API'), (503, 'Public snapshot unavailable or server busy'))}}}
+    return {'operationId': name, 'summary': summary, 'parameters': params + [{'name': 'If-None-Match', 'in': 'header', 'schema': STRING, 'description': 'ETag from a previous response; unchanged representations return 304.'}],
+            'responses': {'200': {'description': 'Public snapshot data. Relative links resolve against the service URL.', 'headers': {'X-JEPA-Snapshot': {'description': 'Catalogue content hash.', 'schema': STRING}, 'ETag': {'description': 'Representation validator; varies with content encoding.', 'schema': STRING}}, 'content': {'application/json': {'schema': ref(schema)}}},
+                          '304': {'description': 'Representation unchanged; no response body.'},
+                          **{str(status): {'description': text, 'content': {'application/json': {'schema': ref('Error')}}, **({'headers': {'Retry-After': {'schema': STRING, 'description': 'Seconds to wait before retrying.'}}} if status in (429, 503) else {})} for status, text in ((400, 'Invalid query'), (404, 'Unknown route or paper'), (409, 'Published snapshot changed'), (405, 'Read-only API'), (414, 'Request target too long'), (429, 'Client request or download budget exceeded'), (503, 'Public snapshot unavailable or server busy'))}}}
 
 
 OPENAPI = {
