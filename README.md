@@ -15,6 +15,7 @@ A continuously growing catalogue of JEPA and related predictive/world-model rese
 - Time-boxed parallel processing with usage receipts. No unattended schedule, account rotation or paid-API fallback.
 - Rights-aware static exports, searchable React catalogue, prerendered paper pages, local citation graphs and downloadable JSON/JSONL/Markdown.
 - Public read-only agent API over the published snapshot: lexical BM25 search, filters, scores, full paper records, citation neighbors, facets and snapshot-pinned pagination. It never opens the private working database or invokes models.
+- A versioned, controlled taxonomy with stable category IDs, hierarchical browsing and append-only classification provenance. Raw model tags remain private. Scientific extractions are not rerun merely to change categories.
 
 ## Current limits
 
@@ -26,9 +27,32 @@ PDF-only parsing currently uses bounded `pdftotext`, not Docling or visual table
 
 Start at **https://jepa.toni.foo/llms.txt**. [OpenAPI 3.1](https://jepa.toni.foo/openapi.json) describes the machine interface; `/api` reports coverage and current snapshot identity. No authentication is needed.
 
-Example: `/api/search?q=latent%20prediction&extracted=true&min_score=50&limit=10`. Follow each result's API link for full extraction, score reasons and evidence references. `/api/facets` lists exact filter labels. Search is lexical and uses all query words, not semantic embeddings. Missing scores remain unknown, and citations are observed links rather than inferred scientific relationships.
+Example: `/api/search?q=latent%20prediction&extracted=true&min_score=50&limit=10`. Follow each result's API link for full extraction, score reasons and evidence references. `/api/taxonomy` lists the category tree and unique-paper counts; `category=science` searches that whole branch. `/api/facets` lists the other exact filter labels. Search is lexical and uses all query words, not semantic embeddings. Missing scores remain unknown, and citations are observed links rather than inferred scientific relationships.
 
 The origin indexes only the immutable public catalogue in memory. A publication switch refreshes the index without a restart. Pagination links pin the snapshot; HTTP 409 means publication changed and the client should restart its search. Current working results are not visible until exported and published. The detailed contract is maintained in `src/jepa/agent-api.txt` and `src/jepa/api_docs.py`.
+
+## Curated data for analysis
+
+`src/jepa/taxonomy.json` owns eight top-level branches: predictive representations; world models and dynamics; planning and control; robotics and embodied AI; physics and scientific modeling; modalities and applications; theory and foundations; evaluation and research resources. Papers can have up to four approved leaf categories. Unknown or ambiguous assignments remain explicit, independently of scientific scores.
+
+The operational database retains raw source/processing history. Public exports are a separate curated layer, generated from one consistent database read snapshot:
+
+| File under `/data/` | Grain / purpose |
+| --- | --- |
+| `papers.jsonl` | One current paper, with version, classification, extraction and appraisal |
+| `taxonomy.json` | Versioned category IDs, parent relations, labels and definitions |
+| `paper-categories.jsonl` | One paper/version/category membership |
+| `findings.jsonl` | One paper/version/finding |
+| `results.jsonl` | One selected result, linked to its finding and paper version |
+| `dictionary.json` | Keys, joins, null semantics and comparability limits |
+
+Stable IDs and preserved evidence make the tables joinable. Missing scores or results are not zero; multi-label category counts are not additive across branches. `numeric_value` preserves the reported scale. Metric, dataset, method, units, split and protocol strings remain as reported rather than being silently merged into supposedly comparable benchmarks.
+
+Future `screen` calls select from the controlled taxonomy. Manual `run` calls first attempt pending classification in a separate, bounded process; failures remain visible and do not block otherwise useful paper extraction. `classify` can also backfill independently while existing extraction workers continue:
+
+```sh
+uv run jepa --env-file runtime/config.env classify --seconds 1800 --workers 4
+```
 
 ## Run locally
 

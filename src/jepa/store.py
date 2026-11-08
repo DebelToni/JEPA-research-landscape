@@ -94,6 +94,12 @@ class Store:
           manifestation_id INTEGER NOT NULL REFERENCES manifestations,
           digest TEXT NOT NULL, extraction TEXT NOT NULL, created REAL NOT NULL,
           UNIQUE(manifestation_id,digest));
+        CREATE TABLE IF NOT EXISTS category_revisions (
+          id INTEGER PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works,
+          manifestation_id INTEGER NOT NULL REFERENCES manifestations,
+          taxonomy_version TEXT NOT NULL, revision_key TEXT NOT NULL,
+          record TEXT NOT NULL, created REAL NOT NULL,
+          UNIQUE(manifestation_id,taxonomy_version,revision_key));
         CREATE TABLE IF NOT EXISTS jobs (
           id INTEGER PRIMARY KEY, work_id TEXT NOT NULL REFERENCES works,
           manifestation_id INTEGER NOT NULL REFERENCES manifestations, stage TEXT NOT NULL,
@@ -116,6 +122,11 @@ class Store:
           PRIMARY KEY(provider,source_id,target_id,relation));
         CREATE VIRTUAL TABLE IF NOT EXISTS paper_search USING fts5(work_id UNINDEXED,title,abstract);
         ''')
+        # Preserve all prototype revisions while separating decision identity
+        # from input provenance (which remains inside each immutable record).
+        if any(row[1] == 'input_sha256' for row in self.db.execute('PRAGMA table_info(category_revisions)')):
+            self.db.execute('ALTER TABLE category_revisions RENAME COLUMN input_sha256 TO revision_key')
+            self.db.commit()
 
     def close(self):
         self.db.close()
@@ -198,10 +209,32 @@ class Store:
         state = self.db.execute('SELECT status FROM manifestation_status WHERE manifestation_id=?', (m['id'],)).fetchone()
         r['status'] = state[0] if state else 'discovered'
         r['sources'] = [row[0] for row in self.db.execute("SELECT DISTINCT json_extract(record,'$.source') FROM source_records WHERE work_id=? ORDER BY 1", (work_id,))]
+        from .taxonomy import VERSION, pending
+        category = self.db.execute('SELECT record FROM category_revisions WHERE manifestation_id=? AND taxonomy_version=? ORDER BY id DESC LIMIT 1', (m['id'], VERSION)).fetchone()
+        r['manifestation_id'] = m['id']
+        r['classification'] = json.loads(category[0]) if category else pending()
+        r['category_ids'] = r['classification']['category_ids']
         return r
 
     def papers(self):
         return [self.get(r[0]) for r in self.db.execute('SELECT work_id FROM works ORDER BY created,work_id')]
+
+    def set_classification(self, work_id, manifestation_id, record, *, overwrite=False):
+        from .taxonomy import validate_assignment
+        validate_assignment(record)
+        owner = self.db.execute('SELECT work_id FROM manifestations WHERE id=?', (manifestation_id,)).fetchone()
+        if not owner or owner[0] != work_id:
+            raise ValueError('Classification manifestation does not belong to work')
+        with self.db:
+            if not self.db.in_transaction: self.db.execute('BEGIN IMMEDIATE')
+            old = self.db.execute('SELECT record FROM category_revisions WHERE manifestation_id=? AND taxonomy_version=? ORDER BY id DESC LIMIT 1', (manifestation_id, record['taxonomy_version'])).fetchone()
+            if old:
+                previous = json.loads(old[0])
+                if old[0] == dumps(record) or (not overwrite and (previous['status'] == 'classified' or previous.get('human_reviewed'))):
+                    return False
+            self.db.execute('INSERT INTO category_revisions(work_id,manifestation_id,taxonomy_version,revision_key,record,created) VALUES(?,?,?,?,?,?)',
+                            (work_id, manifestation_id, record['taxonomy_version'], str(uuid.uuid4()), dumps(record), time.time()))
+        return True
 
     def set_extraction(self, work_id, extraction):
         # Pin historical processing explicitly; omitted version means current.

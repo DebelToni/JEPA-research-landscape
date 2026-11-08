@@ -2,3 +2,7 @@
 .finding {margin-block: 1.5rem;}
 .katex-display {max-width: 100%; overflow-x: auto; overflow-y: hidden;}
 .key-result, .caveat {overflow-wrap: anywhere;}
+
+.filters label{min-width:0;max-width:100%}.filters select,.filters input{min-width:0;max-width:100%}.papers p,article>p{overflow-wrap:anywhere}
+
+.filters label{flex:0 1 180px}.filters label:first-child{flex:1 1 240px}.filters input,.filters select{width:100%}@media(max-width:600px){.filters label{flex:1 1 140px;min-width:0}.filters label:first-child{flex:1 1 100%}}

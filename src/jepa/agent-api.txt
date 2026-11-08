@@ -7,7 +7,7 @@ Discovery, coverage and current snapshot: /api
 
 ## Search and read
 
-1. GET /api/facets for exact topic/source labels and counts across the published corpus.
+1. GET /api/taxonomy for stable category IDs, hierarchy and unique-paper counts rolled up to every ancestor (multi-leaf papers count once per node). taxonomy is null and counts empty for older snapshots without a configured taxonomy. GET /api/facets retains topic/source labels and adds category ID counts.
 2. GET /api/search?q=latent%20prediction&extracted=true&limit=10
 3. Follow results[].links.api for a complete paper record, including extracted findings and appraisal reasons.
 4. Follow links.citations for observed incoming/outgoing citations and compact neighboring records.
@@ -15,7 +15,10 @@ Discovery, coverage and current snapshot: /api
 Search parameters:
 - q: plain text, at most 500 characters / 32 terms. All words must match somewhere in the indexed record; punctuation separates words. No FTS operators, wildcard syntax, phrase syntax or semantic embeddings. Shorten an over-specific query if it returns no matches.
 - relevance: direct, adjacent, context or uncertain (not yet classified).
-- topic, source: exact, case-sensitive labels from /api/facets.
+- category: preferred stable ID from /api/taxonomy, including all descendants. Unknown IDs return 400.
+- classification: classified, needs_review, insufficient_metadata or pending. Missing legacy classification matches none of these statuses.
+- topic: compatibility exact, case-sensitive canonical human-readable leaf path from /api/facets, never a raw legacy tag in new exports.
+- source: exact, case-sensitive discovery-source label from /api/facets.
 - extracted, rated: true or false. Omit either to include both states.
 - year_from, year_to: inclusive publication years. Undated records are excluded when a year filter is supplied.
 - min_score: 0–100, excludes unrated records.
@@ -29,7 +32,8 @@ Search indexes titles, authors, identifiers, topics, keywords, summaries, extrac
 
 GET /api/papers/{work_id}
 The UUID comes from a search result. The response's paper contains:
-- Bibliography, arXiv/DOI identifiers, version, relevance and topics.
+- Bibliography, arXiv/DOI identifiers, version, relevance, canonical leaf category_ids and human-readable leaf paths in topics.
+- classification: taxonomy_version, status, category_ids, reason, basis, model, human_reviewed and optional provenance. This is AI metadata/summary-based classification, separate from evidence quality. Raw scientific qualifiers are not globally harmonized.
 - extraction.sections: research questions, contributions, mechanism, assumptions, theory, limitations, future work and hypotheses. Claims distinguish author statements from analyst inference.
 - extraction.findings: experimental interpretations, selected key_results and caveats.
 - extraction.quality: score, assessed-weight coverage, rubric, scored dimensions with reasons/evidence, and flags.
@@ -55,6 +59,11 @@ Errors are JSON: {"error":{"code":"...","message":"..."}}. Invalid/unknown/repea
 /data/papers.jsonl: one full public record per line.
 /data/papers/{work_id}.json: individual public record without an API envelope.
 /data/papers/{work_id}.md: readable scientific summary/findings; use JSON for quality scores and validation flags.
+/data/taxonomy.json: versioned canonical category hierarchy.
+/data/dictionary.json: table keys, joins, missing-value semantics and numerical-comparability limits.
+/data/paper-categories.jsonl: normalized per-paper category assignments and classification metadata.
+/data/findings.jsonl: normalized experimental findings.
+/data/results.jsonl: normalized selected numerical results, with original scientific qualifiers.
 /data/edges.json: observed citation edges.
 /data/schema.json: extraction JSON Schema, not the whole catalogue/API envelope.
 /data/manifest.json: publication time, coverage, rights notice and file hashes.

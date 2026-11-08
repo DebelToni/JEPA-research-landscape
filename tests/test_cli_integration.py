@@ -170,7 +170,7 @@ def test_export_findings_and_private_legacy_rows(tmp_path):
         assert 'PRIVATE_LEGACY_ROW' not in text
         assert 'PRIVATE_QUOTE' not in text
         assert 'PRIVATE_PROCESSING' not in text
-        assert 'experiments' not in text
+        assert '"experiments":' not in text
     for path in [out/'catalog.json', out/'papers.jsonl', out/'papers'/f'{w}.json', out/'papers'/f'{w}.md']:
         text = path.read_text()
         for expected in ('Interpretation of result', 'selected result', '42', 'A caveat', 'ev1'):

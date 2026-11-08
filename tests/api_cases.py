@@ -55,6 +55,31 @@ def published(tmp_path):
     store.db.commit()
     release = tmp_path/'release-one'
     export_catalog(store, release/'data')
+    # Deliberately edit only the public fixture so API tests do not depend on
+    # the concurrently implemented Store classification API.
+    catalog_path = release/'data/catalog.json'
+    catalog = json.loads(catalog_path.read_text())
+    nodes = [('robotics', None, 'Robotics'), ('robotics/manipulation', 'robotics', 'Manipulation'),
+             ('robotics/navigation', 'robotics', 'Navigation'), ('science', None, 'Science'),
+             ('science/domains', 'science', 'Domains'), ('science/domains/fluids', 'science/domains', 'Fluids')]
+    catalog['taxonomy'] = {'version': 'fixture-v1', 'nodes': [
+        {'id': cid, 'parent': parent, 'label': label, 'description': label} for cid, parent, label in nodes]}
+    statuses = dict(zip('abcde', ['classified', 'needs_review', 'insufficient_metadata', 'pending', 'classified']))
+    for paper in catalog['papers']:
+        key = next(k for k, wid in ids.items() if wid == paper['work_id'])
+        categories = ['robotics/manipulation', 'robotics/navigation'] if key == 'a' else ['science/domains/fluids'] if key == 'e' else []
+        paper['category_ids'] = categories
+        paper['classification'] = {'taxonomy_version': 'fixture-v1', 'status': statuses[key],
+            'category_ids': categories, 'reason': 'Synthetic fixture', 'basis': ['title'],
+            'model': None, 'human_reviewed': False}
+        paper['topics'] = ['Robotics / Manipulation', 'Robotics / Navigation'] if key == 'a' else ['Science / Domains / Fluids'] if key == 'e' else []
+        if paper.get('extraction'):
+            paper['extraction']['topics'] = paper['topics']
+    data = json.dumps(catalog).encode();catalog_path.write_bytes(data)
+    manifest_path = release/'data/manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    manifest['files']['catalog.json'] = hashlib.sha256(data).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
     (release/'index.html').write_text('JEPA landscape')
     store.ingest(record('arxiv', '2401.99999', arxiv_id='2401.99999', title='PRIVATE_NEW_WORK_SENTINEL', url='https://arxiv.org/abs/2401.99999'))
     store.close()
@@ -108,7 +133,7 @@ def test_filters_and_missing_scores(service):
     assert c.get('/api/search?extracted=false').json()['total'] == 2
     assert c.get('/api/search?extracted=true&rated=false').json()['results'][0]['work_id'] == ids['c']
     assert c.get('/api/search?relevance=uncertain').json()['results'][0]['work_id'] == ids['e']
-    assert c.get('/api/search?topic=robotics&source=arxiv&year_from=2025&year_to=2025').json()['total'] == 1
+    assert c.get('/api/search?topic=Robotics%20%2F%20Manipulation&source=arxiv&year_from=2025&year_to=2025').json()['total'] == 1
     assert c.get('/api/search?year_from=1000').json()['total'] == 4
     assert c.get('/api/search?topic=ROBOTICS').json()['total'] == 0
     assert c.get('/api/search?q=2401.00001').json()['results'][0]['work_id'] == ids['a']
@@ -144,7 +169,7 @@ def test_pages_citations_and_facets(service):
 
 @pytest.mark.parametrize('query', ['unknown=x', 'q=a&q=b', 'bare', 'limit=0', 'limit=101', 'limit=1.2', 'offset=-1',
     'min_score=nan', 'min_score=inf', 'min_score=-1', 'min_score=101', 'year_from=2026&year_to=2020',
-    'year_from=no', 'year_to=10000', 'extracted=yes', 'rated=1', 'sort=magic', 'relevance=excluded', 'q=%22*%22',
+    'year_from=no', 'year_to=10000', 'extracted=yes', 'rated=1', 'sort=magic', 'relevance=excluded', 'classification=unknown', 'category=unknown', 'category=', 'q=%22*%22',
     'q='+'x'*501, 'q='+'%20'*501, 'q='+'a%20'*33])
 def test_invalid_queries_are_json_400(service, query):
     c, _, _, _ = service
@@ -187,7 +212,9 @@ def promote(link):
 def test_snapshot_pinning_reload_and_corruption(service):
     c, _, link, _ = service
     old = c.get('/api/search?limit=1').json()
+    taxonomy = c.get('/api/taxonomy').json()
     release = promote(link)
+    assert c.get('/api/taxonomy', params={'snapshot': taxonomy['snapshot']['id']}).status_code == 409
     assert c.get(old['next']).status_code == 409
     assert c.get(old['results'][0]['links']['api']).status_code == 409
     new = c.get('/api/search?q=Promoted').json()
@@ -224,7 +251,7 @@ def test_openapi_matches_response_shapes(service):
     document = copy.deepcopy(OPENAPI)
     registry = Registry().with_resource('https://jepa.toni.foo/data/schema.json', Resource.from_contents(
         json.loads((link/'data/schema.json').read_text()), default_specification=DRAFT202012))
-    for path, schema in [('/api', 'Overview'), ('/api/search', 'Search'), ('/api/facets', 'Facets'),
+    for path, schema in [('/api', 'Overview'), ('/api/search', 'Search'), ('/api/facets', 'Facets'), ('/api/taxonomy', 'Taxonomy'),
                          ('/api/papers/'+ids['a'], 'PaperResponse'), ('/api/papers/'+ids['a']+'/citations', 'Citations'), ('/api/nope', 'Error')]:
         contract = {'$ref': '#/components/schemas/'+schema, 'components': document['components']}
         Draft202012Validator.check_schema(contract)
@@ -254,3 +281,43 @@ def test_overload_is_bounded_and_recovers(published):
             assert c.get('/api').status_code == 200
     finally:
         stalled.close();server.shutdown();server.server_close();thread.join(2)
+
+
+def test_taxonomy_filters_and_unique_rollups(service):
+    c, ids, _, _ = service
+    taxonomy = c.get('/api/taxonomy').json()
+    assert taxonomy['taxonomy']['version'] == 'fixture-v1'
+    assert taxonomy['counts'] == {'robotics': 1, 'robotics/manipulation': 1, 'robotics/navigation': 1,
+                                  'science': 1, 'science/domains': 1, 'science/domains/fluids': 1}
+    assert c.get('/api/facets').json()['facets']['category'] == taxonomy['counts']
+    for category, count in taxonomy['counts'].items():
+        assert c.get('/api/search', params={'category': category}).json()['total'] == count
+    result = c.get('/api/search?category=robotics').json()['results'][0]
+    assert result['work_id'] == ids['a']
+    assert result['category_ids'] == ['robotics/manipulation', 'robotics/navigation']
+    assert result['classification']['status'] == 'classified'
+    for status, keys in [('classified', 'ae'), ('needs_review', 'b'), ('insufficient_metadata', 'c'), ('pending', 'd')]:
+        page = c.get('/api/search', params={'classification': status}).json()
+        assert {p['work_id'] for p in page['results']} == {ids[k] for k in keys}
+    assert c.get('/api/search?q=Manipulation').json()['total'] == 1
+    assert 'Unknown category ID' in c.get('/api/search?category=missing').json()['error']['message']
+
+
+def test_legacy_snapshot_without_taxonomy(published):
+    link, _ = published
+    path = link/'data/catalog.json'
+    catalog = json.loads(path.read_text());catalog.pop('taxonomy')
+    for paper in catalog['papers']:
+        paper.pop('category_ids');paper.pop('classification')
+    data = json.dumps(catalog).encode();path.write_bytes(data)
+    manifest_path = link/'data/manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    manifest['files']['catalog.json'] = hashlib.sha256(data).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    api = AgentAPI();release = link.resolve()
+    result = api.respond('/api/taxonomy', '', release)
+    assert result['taxonomy'] is None and result['counts'] == {}
+    assert api.respond('/api/search', 'classification=pending', release)['total'] == 0
+    assert api.respond('/api/search', '', release)['total'] == 5
+    contract = {'$ref': '#/components/schemas/Taxonomy', 'components': OPENAPI['components']}
+    Draft202012Validator(contract).validate(result)

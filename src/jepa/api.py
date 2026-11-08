@@ -73,6 +73,8 @@ class Snapshot:
             raise ValueError('Catalogue hash mismatch')
         catalog = json.loads(data)
         self.meta = {'id': digest, 'generated_at': catalog['generated_at'], 'schema_version': catalog['schema_version']}
+        self.taxonomy = catalog.get('taxonomy')
+        self.category_nodes = {n['id']: n for n in (self.taxonomy or {}).get('nodes', [])}
         self.coverage = catalog['coverage']
         self.papers = catalog['papers']
         self.by_id = {p['work_id']: p for p in self.papers}
@@ -94,6 +96,24 @@ class Snapshot:
         self.db.commit()
         self.db.execute('PRAGMA query_only=ON')
 
+    def categories(self, paper):
+        """Unique assigned nodes and ancestors, following the published hierarchy."""
+        result = set()
+        for category in paper.get('category_ids') or []:
+            while category in self.category_nodes and category not in result:
+                result.add(category)
+                category = self.category_nodes[category]['parent']
+        return result
+
+    def category_counts(self):
+        counts = Counter({category: 0 for category in self.category_nodes})
+        for paper in self.papers:
+            counts.update(self.categories(paper))
+        return dict(sorted(counts.items()))
+
+    def taxonomy_response(self):
+        return {'snapshot': self.meta, 'taxonomy': self.taxonomy, 'counts': self.category_counts()}
+
     def links(self, work_id):
         query = urlencode({'snapshot': self.meta['id']})
         return {'api': f'/api/papers/{work_id}?{query}', 'citations': f'/api/papers/{work_id}/citations?{query}',
@@ -102,7 +122,7 @@ class Snapshot:
     def summary(self, paper):
         e = paper.get('extraction') or {}
         q = e.get('quality')
-        return {**{k: paper.get(k) for k in ('work_id', 'title', 'authors', 'published', 'arxiv_id', 'doi', 'version', 'relevance', 'topics', 'status')},
+        return {**{k: paper.get(k) for k in ('work_id', 'title', 'authors', 'published', 'arxiv_id', 'doi', 'version', 'relevance', 'topics', 'status', 'category_ids', 'classification')},
                 'has_extraction': paper.get('extraction') is not None,
                 'summary': e.get('summary', '')[:600],
                 'quality': {k: q.get(k) for k in ('score', 'coverage', 'rubric')} if q else None,
@@ -129,6 +149,10 @@ class Snapshot:
             raise APIError(400, 'invalid_query', 'year_from must not exceed year_to.')
         extracted, rated = boolean(params, 'extracted'), boolean(params, 'rated')
         relevance = choice(params, 'relevance', None, ('direct', 'adjacent', 'context', 'uncertain')) if 'relevance' in params else None
+        category = params.get('category')
+        if category is not None and category not in self.category_nodes:
+            raise APIError(400, 'invalid_query', f'Unknown category ID: {category}. See /api/taxonomy.')
+        classification = choice(params, 'classification', None, ('classified', 'needs_review', 'insufficient_metadata', 'pending')) if 'classification' in params else None
         sort = choice(params, 'sort', 'relevance' if q else 'newest', ('relevance', 'newest', 'score'))
         min_score = None
         if 'min_score' in params:
@@ -154,6 +178,8 @@ class Snapshot:
             if extracted is not None and (e is not None) != extracted: continue
             if rated is not None and (score is not None) != rated: continue
             if relevance and p['relevance'] != relevance: continue
+            if category is not None and category not in self.categories(p): continue
+            if classification is not None and (p.get('classification') or {}).get('status') != classification: continue
             if 'topic' in params and params['topic'] not in (p.get('topics') or []): continue
             if 'source' in params and params['source'] not in (p.get('sources') or []): continue
             if ('year_from' in params or 'year_to' in params) and (not year.isdigit() or not year_from <= int(year) <= year_to): continue
@@ -183,6 +209,7 @@ class Snapshot:
             e = p.get('extraction')
             extracted += e is not None
             rated += (((e or {}).get('quality')) or {}).get('score') is not None
+        counters['category'] = self.category_counts()
         return {'snapshot': self.meta, 'total': len(self.papers), 'extracted': extracted, 'rated': rated,
                 'facets': {key: dict(sorted(counter.items())) for key, counter in counters.items()}}
 
@@ -220,10 +247,10 @@ class AgentAPI:
         path = path.rstrip('/')
         match = re.fullmatch(r'/api/papers/([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})(/citations)?', path)
         if path == '/api/search':
-            allowed = ('q', 'relevance', 'topic', 'source', 'extracted', 'rated', 'year_from', 'year_to', 'min_score', 'sort', 'limit', 'offset', 'snapshot')
+            allowed = ('q', 'relevance', 'category', 'classification', 'topic', 'source', 'extracted', 'rated', 'year_from', 'year_to', 'min_score', 'sort', 'limit', 'offset', 'snapshot')
         elif match:
             allowed = ('direction', 'limit', 'offset', 'snapshot') if match[2] else ('snapshot',)
-        elif path in ('/api', '/api/facets'):
+        elif path in ('/api', '/api/facets', '/api/taxonomy'):
             allowed = ('snapshot',)
         else:
             raise APIError(404, 'not_found', 'Unknown API endpoint. See /llms.txt.')
@@ -232,10 +259,11 @@ class AgentAPI:
         if 'snapshot' in params and params['snapshot'] != snapshot.meta['id']:
             raise APIError(409, 'snapshot_changed', 'Published snapshot changed. Restart from /api/search or /api.')
         if path == '/api/search': return snapshot.search(params)
+        if path == '/api/taxonomy': return snapshot.taxonomy_response()
         if path == '/api/facets': return snapshot.facets()
         if path == '/api':
             return {'service': 'jepa-landscape', 'api_version': '1', 'snapshot': snapshot.meta, 'coverage': snapshot.coverage,
-                    'endpoints': {'search': '/api/search', 'facets': '/api/facets', 'paper': '/api/papers/{work_id}', 'citations': '/api/papers/{work_id}/citations', 'instructions': '/llms.txt', 'openapi': '/openapi.json'},
+                    'endpoints': {'search': '/api/search', 'facets': '/api/facets', 'taxonomy': '/api/taxonomy', 'paper': '/api/papers/{work_id}', 'citations': '/api/papers/{work_id}/citations', 'instructions': '/llms.txt', 'openapi': '/openapi.json'},
                     'limitations': ['AI assessments are provisional; source matching is not semantic or human verification.', 'Metadata-only and partial records are included. Missing scores are unknown, not zero.', 'Citation edges are observed links within this published collection, not a complete citation graph.', 'Search is lexical, not semantic. Working data appears only after publication.']}
         paper = snapshot.by_id.get(match[1])
         if paper is None:
